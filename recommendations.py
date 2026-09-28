@@ -25,18 +25,18 @@ try:
     df = pd.read_csv(CSV_PATH)
 except FileNotFoundError:
     raise SystemExit(
-        f"❌ ما لقيت ملف البيانات \"{CSV_PATH}\". تأكدي إنه بنفس مجلد المشروع "
+        f" ما لقيت ملف البيانات \"{CSV_PATH}\". تأكد إنه بنفس مجلد المشروع "
         f"وإنه الاسم مطابق بالضبط (بما فيها حالة الأحرف)."
     )
 except pd.errors.EmptyDataError:
-    raise SystemExit(f"❌ ملف \"{CSV_PATH}\" فاضي أو تالف — افتحيه وتأكدي إنه فيه بيانات.")
+    raise SystemExit(f" ملف \"{CSV_PATH}\" فاضي أو تالف — افتحيه وتأكدي إنه فيه بيانات.")
 except Exception as e:
-    raise SystemExit(f"❌ صار خطأ غير متوقع وإحنا عم نحمّل \"{CSV_PATH}\": {e!r}")
+    raise SystemExit(f" صار خطأ غير متوقع وإحنا عم نحمّل \"{CSV_PATH}\": {e!r}")
 
 missing_cols = [c for c in REQUIRED_COLUMNS if c not in df.columns]
 if missing_cols:
     raise SystemExit(
-        f"❌ ملف البيانات ناقصه هالأعمدة: {missing_cols}. "
+        f" ملف البيانات ناقصه هالأعمدة: {missing_cols}. "
         f"تأكدي إنه نفس ملف amman_places_final_v2.csv الأصلي ومو نسخة معدّلة بالغلط."
     )
 
@@ -53,7 +53,7 @@ try:
     tfidf_matrix = tfidf.fit_transform(df['combined_features'])
     similarity_matrix = cosine_similarity(tfidf_matrix)
 except Exception as e:
-    raise SystemExit(f"❌ صار خطأ وإحنا عم نجهّز محرك البحث (TF-IDF): {e!r}")
+    raise SystemExit(f" صار خطأ وإحنا عم نجهّز محرك البحث (TF-IDF): {e!r}")
 
 
 def get_recommendations(place_name, place_id=None, top_n=10):

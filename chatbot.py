@@ -43,7 +43,7 @@ def _log_interaction(session_id, user_message, tool_used, response_time, had_err
                 session_id, user_message, tool_used or "", round(response_time, 3), had_error,
             ])
     except Exception as e:
-        logger.warning(f"فشل تسجيل سطر بملف chatbot_analytics.csv: {e}")
+        logger.warning(f"تعذّر تسجيل السطر في ملف chatbot_analytics.csv: {e}")
 
 app = Flask(__name__)
 app.config['JSON_AS_ASCII'] = False
@@ -84,6 +84,10 @@ INFO_TRIGGERS = [
     "details about", "phone number",
 ]
 
+LOCATION_TRIGGERS = [
+    "موقع", "لوكيشن", "location", "where is",
+]
+
 LIST_TRIGGERS = [
     "كل ال", "جميع", "شو عندكم", "شو عندكن", "وش عندكم", "ايش عندكم",
     "عندكم", "عندكن", "وريني", "ورجيني", "ورينا", "ابغى اشوف", "بغيت اشوف",
@@ -113,11 +117,13 @@ GENERIC_NAME_WORDS = {
     "كره", "قدم", "الكره", "القدم", "رياضه", "الرياضه",
     
     "عمان", "amman", "جبل",
+
+    "موقع", "مواقع",
     
     "first", "best", "top", "new", "good", "great", "one", "spot",
     "place", "get", "near", "nice", "cool", "the", "and", "for", "with",
    
-    "of", "is", "are", "in", "on", "at", "to", "a", "an",
+    "of", "is", "are", "in", "on", "at", "to", "a", "an", "al",
 }
 
 
@@ -150,15 +156,22 @@ for _, _row in df.iterrows():
     })
 
 
-def find_category_match(norm_query):
+def find_all_category_matches(norm_query):
     norm_query_core = core_text(norm_query)
+    matched = []
     for official_category, synonyms in CATEGORY_SYNONYMS.items():
         for syn in synonyms:
             syn_core = core_text(normalize_ar(syn))
             pattern = re.escape(syn_core) + r"(?!ه)"
             if re.search(pattern, norm_query_core):
-                return official_category
-    return None
+                matched.append(official_category)
+                break
+    return matched
+
+
+def find_category_match(norm_query):
+    matched = find_all_category_matches(norm_query)
+    return matched[0] if matched else None
 
 
 def find_place_match(query_tokens):
@@ -202,6 +215,7 @@ def rule_based_classify(user_message, last_place=None):
     has_nearby_trigger = any(normalize_ar(t) in norm_query for t in NEARBY_TRIGGERS)
     has_rating_trigger = any(normalize_ar(t) in norm_query for t in RATING_TRIGGERS)
     has_info_trigger = any(normalize_ar(t) in norm_query for t in INFO_TRIGGERS)
+    has_location_trigger = any(normalize_ar(t) in norm_query for t in LOCATION_TRIGGERS)
 
     place = find_place_match(query_tokens)
     category = find_category_match(norm_query)
@@ -229,7 +243,7 @@ def rule_based_classify(user_message, last_place=None):
         return "nearby_search", {"neighborhood": neighborhood_name, "category": category}
 
     resolved_place = place or last_place
-    if resolved_place and (has_rating_trigger or has_info_trigger or day):
+    if (resolved_place and (has_rating_trigger or has_info_trigger or day)) or (place and has_location_trigger):
         return "place_info", {"place_name": resolved_place, "day": day}
 
     if place and has_similarity_trigger:
@@ -322,6 +336,18 @@ available_functions = {
     "filter_by_category": filter_by_category,
     "get_recommendations": get_recommendations,
 }
+
+def _category_aware_search(user_query, top_n=5):
+    categories = find_all_category_matches(normalize_ar(user_query))
+    ranked = search_by_text(user_query, top_n=len(df))
+    if not categories:
+        return ranked[:top_n]
+    allowed = set()
+    for category in categories:
+        allowed.update(filter_by_category(category))
+    filtered = [name for name in ranked if name in allowed]
+    return (filtered or ranked)[:top_n]
+
 
 SESSION_STATE = {}
 
@@ -477,7 +503,10 @@ def _ask_chatbot_impl(user_message, session_id="default"):
         lines = [intro_ar if arabic else intro_en] + [f"• {n}" for n in names] 
         return "\n".join(lines) + note, debug_info
 
-    function_result = available_functions[tool_name](**tool_args)
+    if tool_name == "search_by_text":
+        function_result = _category_aware_search(tool_args["user_query"])
+    else:
+        function_result = available_functions[tool_name](**tool_args)
     debug_info["tool_result"] = function_result
 
     if tool_name == "get_recommendations":
@@ -650,13 +679,13 @@ def chat():
         data = request.get_json(silent=True) or {}
     except Exception as e:
         logger.error(f"فشل قراءة JSON من الطلب: {e!r}", exc_info=True)
-        return jsonify({"error": "الطلب مش بصيغة JSON صحيحة"}), 400
+        return jsonify({"error": "الطلب ليس بصيغة JSON صحيحة"}), 400
 
     user_message = data.get("message")
     session_id = data.get("session_id", "default")
 
     if not user_message or not isinstance(user_message, str) or not user_message.strip():
-        return jsonify({"error": "يجب إرسال معامل message كنص غير فاضي"}), 400
+        return jsonify({"error": "يجب إرسال المعامل message كنص غير فارغ"}), 400
 
     try:
         reply, debug_info = ask_chatbot(user_message, session_id=session_id)
@@ -668,8 +697,8 @@ def chat():
         })
     except Exception as e:
 
-        logger.critical(f"خطأ غير متوقع بالكامل بالـ /chat endpoint: {e!r}", exc_info=True)
-        return jsonify({"error": "صار في مشكلة تقنية، جربي بعد شوي", "reply": None}), 500
+        logger.critical(f"خطأ غير متوقع بالكامل في نقطة النهاية /chat: {e!r}", exc_info=True)
+        return jsonify({"error": "حدث خطأ تقني، يُرجى المحاولة لاحقاً", "reply": None}), 500
 
 
 if __name__ == "__main__":
